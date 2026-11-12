@@ -1,0 +1,21 @@
+1) Create two players and a car with exactly 1 in stock
+  Ash balance 100,000 | Riya balance 100,000
+  Shop: Sports Car 1794451656 @ 50,000 coins, stock 1
+
+2) Both players press BUY at the same instant
+  Ash-1794451656 buys the last car   409  {"detail": "Sports Car 1794451656 is sold out."}
+  Riya-1794451656 buys the last car  201  {"purchase_id": 6, "player_id": 10, "car_id": 8, "car_name": "Sports Car 1794451656", "price_paid": 50000, "balance_after": 50000, "stock_after": 0, "replayed": false}
+
+3) Final state
+  Ash-1794451656 balance             200  {"balance": 100000}
+  Ash-1794451656 garage              200  []
+  Riya-1794451656 balance            200  {"balance": 50000}
+  Riya-1794451656 garage             200  ["Sports Car 1794451656"]
+  Shop stock after the race          200  {"stock": 0}
+
+4) Retry the same purchase request three times (same Idempotency-Key)
+  attempt 1                          201  {"purchase_id": 7, "balance_after": 70000, "replayed": false}
+  attempt 2                          201  {"purchase_id": 7, "balance_after": 70000, "replayed": true}
+  attempt 3                          201  {"purchase_id": 7, "balance_after": 70000, "replayed": true}
+
+  Charged once: balance 70,000, cars owned 1 (winner of the race: Riya-1794451656)
