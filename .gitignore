@@ -1,8 +1,23 @@
+# Python caches
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
 .venv/
 venv/
-.pytest_cache/
+
+# Local databases — never commit player/test data
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite3
+
+# Local secrets — never commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
