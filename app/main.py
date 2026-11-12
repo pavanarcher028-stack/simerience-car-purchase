@@ -7,18 +7,20 @@ Then open http://127.0.0.1:8000/docs
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path as FileSystemPath
 
-from fastapi import FastAPI, Header, Path
+from fastapi import FastAPI, Header, HTTPException, Path
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import store
+from . import demo_data, store
 from .db import db_path, init_db
 from .schemas import (
     CarCreate,
     CarOut,
+    DevResetOut,
     GarageItem,
     HealthOut,
     PlayerCreate,
@@ -64,6 +66,30 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 def showroom() -> FileResponse:
     """The visual car showroom. The API below is the only thing it talks to."""
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/race", include_in_schema=False, response_class=FileResponse)
+def race_lab() -> FileResponse:
+    """Concurrency lab: two players, one car, real simultaneous requests."""
+    return FileResponse(STATIC_DIR / "race.html")
+
+
+# --------------------------------------------------------------------------- #
+# Development helpers
+# --------------------------------------------------------------------------- #
+@app.post("/dev/reset", response_model=DevResetOut, tags=["dev"])
+def dev_reset() -> DevResetOut:
+    """DEVELOPMENT ONLY — wipe purchases and restore the demo dealership.
+
+    Enabled by default for the local prototype. Set ``SIMERENCE_ALLOW_RESET=0``
+    to switch it off (for example before showing the app to someone else).
+    """
+    if os.environ.get("SIMERENCE_ALLOW_RESET", "1") == "0":
+        raise HTTPException(
+            status_code=403,
+            detail="Demo reset is disabled (SIMERENCE_ALLOW_RESET=0).",
+        )
+    return DevResetOut(**demo_data.seed_demo_data(wipe=True))
 
 
 # --------------------------------------------------------------------------- #

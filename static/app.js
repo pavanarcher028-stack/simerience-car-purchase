@@ -1,375 +1,711 @@
-/* SIMERIENCE showroom front end.
+/* SIMERIENCE · Motorworks — showroom client
  *
- * Talks to the existing FastAPI backend and nothing else:
+ * Talks only to the existing FastAPI endpoints:
  *   GET  /players, /players/{id}, /players/{id}/garage, /cars
- *   POST /purchase  (requires an Idempotency-Key header)
+ *   POST /purchase   (requires an Idempotency-Key header)
  *
- * The purchase protections live in app/store.py. This file only has to respect
- * two rules: one fresh key per attempt, and the *same* key when retrying.
+ * Purchase protections live in app/store.py. The client's job is to send one
+ * fresh key per attempt, reuse the same key when retrying after a network
+ * failure, and show whatever the server actually returned.
  */
+
+import { api, coins, el, formatDate, ownershipId } from "./api.js";
+import { carArt, classify } from "./art.js";
 
 const els = {
   playerSelect: document.getElementById("player-select"),
-  balance: document.getElementById("balance-value"),
-  balanceBox: document.querySelector(".balance"),
-  grid: document.getElementById("car-grid"),
+  wallet: document.getElementById("wallet"),
+  walletValue: document.getElementById("wallet-value"),
+  heroArt: document.getElementById("hero-art"),
+  heroName: document.getElementById("hero-name"),
+  heroClass: document.getElementById("hero-class"),
+  heroStock: document.getElementById("hero-stock"),
+  heroNote: document.getElementById("hero-note"),
+  heroPrice: document.getElementById("hero-price"),
+  heroBuy: document.getElementById("hero-buy"),
+  heroGarage: document.getElementById("hero-garage"),
+  filters: document.getElementById("filters"),
+  search: document.getElementById("search"),
+  sort: document.getElementById("sort"),
+  grid: document.getElementById("grid"),
+  shopCount: document.getElementById("shop-count"),
+  shopError: document.getElementById("shop-error"),
+  shopErrorText: document.getElementById("shop-error-text"),
+  shopRetry: document.getElementById("shop-retry"),
   shopEmpty: document.getElementById("shop-empty"),
-  garage: document.getElementById("garage-list"),
+  garage: document.getElementById("garage"),
   garageEmpty: document.getElementById("garage-empty"),
   garageCount: document.getElementById("garage-count"),
-  log: document.getElementById("log"),
-  retry: document.getElementById("retry"),
-  refresh: document.getElementById("refresh"),
-  toast: document.getElementById("toast"),
+  garageSection: document.getElementById("garage-section"),
+  modalRoot: document.getElementById("modal-root"),
+  toasts: document.getElementById("toasts"),
 };
+
+const FILTERS = [
+  ["all", "All"],
+  ["coupe", "Sport"],
+  ["suv", "SUV"],
+  ["truck", "Off-road"],
+  ["hatch", "Compact"],
+  ["sedan", "Luxury"],
+  ["owned", "In garage"],
+];
 
 const state = {
   players: [],
-  cars: [],
   playerId: null,
-  busy: new Set(),      // car ids with a request in flight
-  lastAttempt: null,    // { playerId, carId, key } for the retry button
-  logs: [],
+  cars: [],
+  garage: [],
+  filter: "all",
+  query: "",
+  sort: "featured",
+  selectedId: null,
+  loading: true,
+  lastFocus: null,
+  closeModal: null,
 };
 
-/* ------------------------------------------------------------------ helpers */
+/* ---------------------------------------------------------------- derived */
 
-const coins = (n) => new Intl.NumberFormat("en-US").format(n ?? 0);
-const carEmoji = (name) => {
-  const n = name.toLowerCase();
-  if (n.includes("suv") || n.includes("truck")) return "🚙";
-  if (n.includes("hatch") || n.includes("compact")) return "🚗";
-  if (n.includes("sport") || n.includes("super")) return "🏎️";
-  return "🚘";
-};
+const ownedIds = () => new Set(state.garage.map((item) => item.car_id));
+const currentPlayer = () => state.players.find((p) => p.id === state.playerId) ?? null;
+const wallet = () => currentPlayer()?.balance ?? 0;
 
-async function api(method, path, { body, headers } = {}) {
-  const res = await fetch(path, {
-    method,
-    headers: { "Content-Type": "application/json", ...headers },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    /* empty or non-JSON body */
-  }
-  return { status: res.status, ok: res.ok, data };
+function stockLabel(car) {
+  if (car.stock === 0) return "Sold out";
+  if (car.stock === 1) return "1 unit left";
+  return `${car.stock} units`;
 }
 
-let toastTimer = null;
+function stockBadgeClass(car) {
+  if (car.stock === 0) return "badge badge--out";
+  if (car.stock === 1) return "badge badge--low";
+  return "badge";
+}
+
 function toast(message, kind = "") {
-  els.toast.textContent = message;
-  els.toast.className = `toast show ${kind}`;
-  els.toast.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    els.toast.classList.remove("show");
-    setTimeout(() => {
-      els.toast.hidden = true;
-    }, 250);
-  }, 3200);
+  const node = el("div", `toast${kind ? " toast--" + kind : ""}`, message);
+  node.setAttribute("role", "status");
+  els.toasts.append(node);
+  setTimeout(() => node.remove(), 4200);
 }
 
-/* --------------------------------------------------------------------- data */
+/* ------------------------------------------------------------------- data */
 
 async function loadPlayers() {
   const { ok, data } = await api("GET", "/players");
-  state.players = ok ? data : [];
+  state.players = ok && Array.isArray(data) ? data : [];
 
   els.playerSelect.replaceChildren(
-    ...state.players.map((p) => {
-      const opt = document.createElement("option");
-      opt.value = String(p.id);
-      opt.textContent = p.name;
-      return opt;
+    ...state.players.map((player) => {
+      const option = el("option", null, `${player.name} · ${coins(player.balance)}`);
+      option.value = String(player.id);
+      return option;
     })
   );
 
-  if (!state.players.length) {
-    els.balance.textContent = "—";
-    return;
-  }
   const remembered = Number(localStorage.getItem("simerience:player"));
-  const exists = state.players.some((p) => p.id === remembered);
-  state.playerId = exists ? remembered : state.players[0].id;
-  els.playerSelect.value = String(state.playerId);
-  renderBalance();
+  const known = state.players.some((p) => p.id === remembered);
+  state.playerId = state.players.length
+    ? known
+      ? remembered
+      : state.players[0].id
+    : null;
+
+  if (state.playerId !== null) els.playerSelect.value = String(state.playerId);
+  els.playerSelect.disabled = state.players.length === 0;
+  renderWallet();
 }
 
-async function loadShop() {
+async function loadCars() {
   const { ok, data } = await api("GET", "/cars");
-  state.cars = ok ? data : [];
-  renderShop();
+  if (!ok || !Array.isArray(data)) {
+    showShopError("The showroom could not reach the dealership API.");
+    return false;
+  }
+  state.cars = data;
+  els.shopError.hidden = true;
+  return true;
 }
 
 async function loadGarage() {
-  if (!state.playerId) return;
+  if (state.playerId === null) {
+    state.garage = [];
+    return;
+  }
   const { ok, data } = await api("GET", `/players/${state.playerId}/garage`);
-  renderGarage(ok ? data : []);
+  state.garage = ok && Array.isArray(data) ? data : [];
 }
 
-async function refreshAll({ balanceFlash = false } = {}) {
-  await loadPlayers();
-  await Promise.all([loadShop(), loadGarage()]);
-  if (balanceFlash) {
-    els.balanceBox.classList.remove("flash");
-    void els.balanceBox.offsetWidth; // restart the animation
-    els.balanceBox.classList.add("flash");
+/* Balances change on purchase, so re-read them without resetting the selection. */
+async function loadBalances() {
+  const { ok, data } = await api("GET", "/players");
+  if (!ok || !Array.isArray(data)) return;
+  state.players = data;
+  for (const option of els.playerSelect.options) {
+    const player = state.players.find((p) => String(p.id) === option.value);
+    if (player) option.textContent = `${player.name} · ${coins(player.balance)}`;
   }
 }
 
-/* ------------------------------------------------------------------ render */
-
-function currentPlayer() {
-  return state.players.find((p) => p.id === state.playerId) ?? null;
+async function refresh({ flashWallet = false } = {}) {
+  await loadBalances();
+  const ok = await loadCars();
+  await loadGarage();
+  renderAll();
+  if (ok && flashWallet) {
+    els.wallet.classList.remove("is-flashing");
+    void els.wallet.offsetWidth;
+    els.wallet.classList.add("is-flashing");
+  }
 }
 
-function renderBalance() {
-  const player = currentPlayer();
-  els.balance.textContent = player ? coins(player.balance) : "—";
+/* ----------------------------------------------------------------- render */
+
+function renderWallet() {
+  els.walletValue.textContent = currentPlayer() ? coins(wallet()) : "—";
 }
 
-function renderShop() {
+function renderAll() {
+  renderWallet();
+  renderHero();
+  renderFilters();
+  renderGrid();
+  renderGarage();
+}
+
+function renderFilters() {
+  if (els.filters.childElementCount === 0) {
+    for (const [value, label] of FILTERS) {
+      const chip = el("button", "chip", label);
+      chip.type = "button";
+      chip.dataset.value = value;
+      chip.addEventListener("click", () => {
+        state.filter = value;
+        renderFilters();
+        renderGrid();
+      });
+      els.filters.append(chip);
+    }
+  }
+  for (const chip of els.filters.children) {
+    chip.setAttribute("aria-pressed", String(chip.dataset.value === state.filter));
+  }
+}
+
+function selectedCar() {
+  if (state.selectedId !== null) {
+    const found = state.cars.find((car) => car.id === state.selectedId);
+    if (found) return found;
+  }
+  return state.cars.find((car) => car.stock > 0) ?? state.cars[0] ?? null;
+}
+
+function renderHero() {
+  const car = selectedCar();
+  if (!car) {
+    els.heroName.textContent = "Showroom closed";
+    els.heroClass.textContent = "—";
+    els.heroStock.textContent = "No stock";
+    els.heroStock.className = "badge badge--out";
+    els.heroPrice.textContent = "—";
+    els.heroNote.textContent = "Add vehicles to the database to open the floor.";
+    els.heroArt.replaceChildren();
+    els.heroBuy.disabled = true;
+    els.heroBuy.textContent = "Reserve vehicle";
+    return;
+  }
+
+  const owned = ownedIds().has(car.id);
+  els.heroName.textContent = car.name;
+  els.heroClass.textContent = classify(car.name).label;
+  els.heroStock.textContent = stockLabel(car);
+  els.heroStock.className = stockBadgeClass(car);
+  els.heroPrice.textContent = coins(car.price);
+  els.heroArt.innerHTML = carArt(car.name);
+
+  els.heroNote.textContent = owned
+    ? "Already parked in your garage."
+    : car.stock === 0
+      ? "All units sold. Check back after the next allocation."
+      : car.stock === 1
+        ? "Final unit allocated to this floor."
+        : `${car.stock} units on the floor.`;
+
+  const affordable = wallet() >= car.price;
+  els.heroBuy.disabled = car.stock === 0 || !affordable || !currentPlayer();
+  els.heroBuy.textContent =
+    car.stock === 0
+      ? "Sold out"
+      : !currentPlayer()
+        ? "Select a player"
+        : !affordable
+          ? `Need ${coins(car.price - wallet())} more`
+          : `Reserve · ${coins(car.price)}`;
+}
+
+function visibleCars() {
+  const owned = ownedIds();
+  let list = [...state.cars];
+
+  if (state.filter === "owned") list = list.filter((car) => owned.has(car.id));
+  else if (state.filter !== "all") {
+    list = list.filter((car) => classify(car.name).kind === state.filter);
+  }
+
+  if (state.query) {
+    const query = state.query.toLowerCase();
+    list = list.filter((car) => car.name.toLowerCase().includes(query));
+  }
+
+  switch (state.sort) {
+    case "price-asc":
+      list.sort((a, b) => a.price - b.price);
+      break;
+    case "price-desc":
+      list.sort((a, b) => b.price - a.price);
+      break;
+    case "stock":
+      list.sort((a, b) => b.stock - a.stock || a.price - b.price);
+      break;
+    default:
+      break;
+  }
+  return list;
+}
+
+function renderGrid() {
+  const list = visibleCars();
   els.grid.replaceChildren();
-  els.shopEmpty.hidden = state.cars.length > 0;
 
-  for (const car of state.cars) {
-    const card = document.createElement("article");
-    card.className = "car" + (car.stock === 0 ? " sold-out" : "");
-
-    const head = document.createElement("div");
-    head.className = "car-head";
-
-    const emoji = document.createElement("span");
-    emoji.className = "car-emoji";
-    emoji.setAttribute("aria-hidden", "true");
-    emoji.textContent = carEmoji(car.name);
-
-    const title = document.createElement("h3");
-    title.textContent = car.name;
-
-    const stock = document.createElement("span");
-    stock.className =
-      "stock " + (car.stock === 0 ? "none" : car.stock <= 1 ? "low" : "");
-    stock.textContent =
-      car.stock === 0 ? "Sold out" : car.stock === 1 ? "1 left" : `${car.stock} left`;
-
-    head.append(emoji, title, stock);
-
-    const price = document.createElement("div");
-    price.className = "price";
-    price.innerHTML = `<span class="coin" aria-hidden="true">◎</span> ${coins(car.price)}`;
-
-    const affordable = currentPlayer() && currentPlayer().balance >= car.price;
-    const btn = document.createElement("button");
-    btn.className = "buy";
-    btn.type = "button";
-    btn.dataset.carId = String(car.id);
-
-    if (car.stock === 0) {
-      btn.textContent = "Sold out";
-      btn.disabled = true;
-    } else if (!currentPlayer()) {
-      btn.textContent = "No player selected";
-      btn.disabled = true;
-    } else if (!affordable) {
-      btn.textContent = "Not enough coins";
-      btn.disabled = true;
-    } else {
-      btn.textContent = "Buy for " + coins(car.price);
-      btn.addEventListener("click", () => purchase(car.id));
+  if (state.loading) {
+    for (let i = 0; i < 3; i += 1) {
+      const skeleton = el("div", "card card--skeleton");
+      skeleton.append(el("div", "card__stage skeleton"), el("div", "card__body"));
+      els.grid.append(skeleton);
     }
-
-    if (state.busy.has(car.id)) {
-      btn.classList.add("busy");
-      btn.disabled = true;
-    }
-
-    card.append(head, price, btn);
-    els.grid.append(card);
+    els.shopCount.textContent = "";
+    els.shopEmpty.hidden = true;
+    return;
   }
+
+  for (const car of list) els.grid.append(cardFor(car));
+
+  const total = state.cars.length;
+  els.shopCount.textContent =
+    total === 0 ? "" : `${list.length} of ${total} vehicles`;
+  els.shopEmpty.hidden = list.length > 0;
+
+  const active = selectedCar();
+  if (active) state.selectedId = active.id;
 }
 
-function renderGarage(items) {
+function cardFor(car) {
+  const owned = ownedIds().has(car.id);
+  const affordable = wallet() >= car.price;
+  const soldOut = car.stock === 0;
+
+  const card = el(
+    "article",
+    "card" + (soldOut ? " is-sold-out" : "") + (state.selectedId === car.id ? " is-selected" : "")
+  );
+  card.dataset.carId = String(car.id);
+
+  const stage = el("div", "card__stage");
+  stage.innerHTML = carArt(car.name);
+
+  const body = el("div", "card__body");
+  body.append(el("h3", "card__title", car.name));
+
+  const sub = el("div", "card__sub");
+  sub.append(el("span", "tag", classify(car.name).label));
+  const badges = el("span", null, null);
+  badges.style.display = "inline-flex";
+  badges.style.gap = "8px";
+  if (owned) badges.append(el("span", "badge badge--owned", "In garage"));
+  badges.append(el("span", stockBadgeClass(car), stockLabel(car)));
+  sub.append(badges);
+
+  const footer = el("div", "card__footer");
+  const price = el("div", "price");
+  price.append(document.createTextNode(coins(car.price)), el("small", null, "coins"));
+
+  const actions = el("div", "card__actions");
+
+  const view = el("button", "btn btn--quiet btn--sm", "View");
+  view.type = "button";
+  view.addEventListener("click", () => {
+    state.selectedId = car.id;
+    renderHero();
+    renderGrid();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  const buy = el("button", "btn btn--primary btn--sm");
+  buy.type = "button";
+  if (soldOut) {
+    buy.textContent = "Sold out";
+    buy.disabled = true;
+  } else if (!affordable) {
+    buy.textContent = "Not enough";
+    buy.disabled = true;
+    buy.title = `You need ${coins(car.price - wallet())} more coins.`;
+  } else {
+    buy.textContent = "Reserve";
+    buy.addEventListener("click", () => openPurchase(car));
+  }
+
+  actions.append(view, buy);
+  footer.append(price, actions);
+  body.append(sub, footer);
+  card.append(stage, body);
+  return card;
+}
+
+function renderGarage() {
+  const items = [...state.garage].reverse();
   els.garage.replaceChildren();
   els.garageEmpty.hidden = items.length > 0;
   els.garageCount.textContent = items.length
-    ? `${items.length} car${items.length === 1 ? "" : "s"}`
+    ? `${items.length} vehicle${items.length === 1 ? "" : "s"}`
     : "";
-  els.garageCount.hidden = items.length === 0;
 
   for (const item of items) {
-    const li = document.createElement("li");
+    const row = el("div", "garage__row");
 
-    const name = document.createElement("span");
-    name.className = "name";
-    name.innerHTML = `<span aria-hidden="true">${carEmoji(item.car_name)}</span>`;
-    const label = document.createElement("span");
-    label.textContent = item.car_name;
-    name.append(label);
+    const thumb = el("div", "garage__thumb");
+    thumb.innerHTML = carArt(item.car_name);
 
-    const meta = document.createElement("span");
-    meta.className = "meta";
-    meta.textContent = `paid ${coins(item.price_paid)} coins`;
+    const info = el("div");
+    info.append(
+      el("div", "garage__name", item.car_name),
+      el("div", "garage__id", `Ownership ${ownershipId(item.purchase_id)}`)
+    );
 
-    li.append(name, meta);
-    els.garage.append(li);
+    const paid = el("div", "garage__paid");
+    paid.append(document.createTextNode(`${coins(item.price_paid)} coins`));
+
+    const date = el("div", "garage__date", formatDate(item.purchased_at));
+
+    row.append(thumb, info, paid, date);
+    els.garage.append(row);
   }
 }
 
-function renderLogs() {
-  if (!state.logs.length) {
-    els.log.innerHTML =
-      '<p class="empty">Requests appear here, with the status the backend returned.</p>';
-    return;
-  }
-
-  els.log.replaceChildren(
-    ...state.logs.map((entry) => {
-      const row = document.createElement("div");
-      row.className = "log-row" + (entry.replayed ? " replayed" : "");
-
-      const time = document.createElement("time");
-      time.textContent = entry.time;
-
-      const desc = document.createElement("span");
-      desc.className = "desc";
-      desc.textContent = entry.message;
-
-      const key = document.createElement("span");
-      key.className = "key";
-      key.textContent = entry.key ? entry.key.slice(0, 8) : "";
-
-      const status = document.createElement("span");
-      const kind = entry.replayed ? "replay" : entry.ok ? "ok" : "bad";
-      status.className = "status " + kind;
-      status.textContent = entry.replayed ? `201 replayed` : String(entry.status);
-
-      row.append(time, desc, key, status);
-      return row;
-    })
-  );
+function showShopError(message) {
+  state.loading = false;
+  els.shopError.hidden = false;
+  els.shopErrorText.textContent = message;
+  els.grid.replaceChildren();
+  els.shopCount.textContent = "";
 }
 
-function addLog(entry) {
-  state.logs.unshift({
-    time: new Date().toLocaleTimeString([], { hour12: false }),
-    ...entry,
+/* ------------------------------------------------------------------ modal */
+
+function openModal(build) {
+  closeModal();
+
+  const backdrop = el("div", "modal-backdrop");
+  const panel = el("div", "modal");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "modal-title");
+  backdrop.append(panel);
+  els.modalRoot.append(backdrop);
+
+  state.lastFocus = document.activeElement;
+
+  const close = () => {
+    backdrop.remove();
+    state.closeModal = null;
+    if (state.lastFocus instanceof HTMLElement) state.lastFocus.focus();
+  };
+  state.closeModal = close;
+
+  backdrop.addEventListener("mousedown", (event) => {
+    if (event.target === backdrop) close();
   });
-  state.logs = state.logs.slice(0, 12);
-  renderLogs();
-}
 
-/* ---------------------------------------------------------------- purchase */
-
-async function purchase(carId, { key = crypto.randomUUID(), isRetry = false } = {}) {
-  if (!state.playerId || state.busy.has(carId)) return;
-
-  const car = state.cars.find((c) => c.id === carId);
-  const player = currentPlayer();
-  const payload = { player_id: state.playerId, car_id: carId };
-
-  state.busy.add(carId);
-  state.lastAttempt = { playerId: state.playerId, carId, key };
-  els.retry.disabled = false;
-  renderShop();
-
-  let result;
-  try {
-    result = await api("POST", "/purchase", {
-      body: payload,
-      headers: { "Idempotency-Key": key },
-    });
-  } catch (networkError) {
-    // The request may or may not have reached the server. Retry once with the
-    // SAME key: if it did land, the backend replays instead of charging twice.
-    addLog({
-      status: "—",
-      ok: false,
-      key,
-      message: `Network error buying ${car?.name ?? "car"} — retrying with the same key`,
-    });
-    try {
-      result = await api("POST", "/purchase", {
-        body: payload,
-        headers: { "Idempotency-Key": key },
-      });
-    } catch {
-      state.busy.delete(carId);
-      renderShop();
-      toast("Could not reach the server. Your coins were not touched.", "error");
+  const onKey = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
       return;
     }
-  }
-
-  state.busy.delete(carId);
-
-  const { status, ok, data } = result;
-
-  if (ok && data) {
-    const wasReplay = data.replayed;
-    addLog({
-      status,
-      ok: true,
-      replayed: wasReplay,
-      key,
-      message: wasReplay
-        ? `Retry replayed — ${data.car_name} was already bought, no second charge`
-        : `${player?.name ?? "Player"} bought ${data.car_name} for ${coins(data.price_paid)}`,
-    });
-    toast(
-      wasReplay
-        ? `Already purchased — replayed, no coins taken.`
-        : `${data.car_name} added to your garage. -${coins(data.price_paid)} coins`,
-      "success"
+    if (event.key !== "Tab") return;
+    const focusable = panel.querySelectorAll(
+      'button:not(:disabled), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     );
-    await refreshAll({ balanceFlash: true });
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener("keydown", onKey);
+
+  const originalClose = close;
+  state.closeModal = () => {
+    document.removeEventListener("keydown", onKey);
+    originalClose();
+  };
+
+  build(panel, state.closeModal);
+  panel.querySelector("button, [href]")?.focus();
+}
+
+function closeModal() {
+  state.closeModal?.();
+}
+
+function modalHeader(panel, title) {
+  const head = el("div", "modal__head");
+  const heading = el("h2", null, title);
+  heading.id = "modal-title";
+  const close = el("button", "icon-btn", "×");
+  close.type = "button";
+  close.setAttribute("aria-label", "Close");
+  close.addEventListener("click", closeModal);
+  head.append(heading, close);
+  panel.append(head);
+  return head;
+}
+
+function openPurchase(car) {
+  const player = currentPlayer();
+  if (!player) {
+    toast("Choose a player first.", "error");
+    return;
+  }
+  if (car.stock === 0) {
+    toast(`${car.name} is sold out.`, "error");
     return;
   }
 
-  const detail = data?.detail ?? "Purchase failed.";
+  openModal((panel, close) => {
+    modalHeader(panel, "Confirm reservation");
 
-  if (status === 409 && /sold out/i.test(detail)) {
-    toast(`${car?.name ?? "That car"} just sold out. No coins were taken.`, "error");
-  } else if (status === 400) {
-    toast(detail, "error");
-  } else if (status === 409) {
-    toast(detail, "error");
-  } else {
-    toast(detail, "error");
-  }
+    const art = el("div", "modal__art");
+    art.innerHTML = carArt(car.name);
+    panel.append(art);
 
-  addLog({ status, ok: false, key, message: detail });
-  await refreshAll();
+    const list = el("dl", "summary");
+    const row = (label, value, extra = "") => {
+      const wrap = el("div", `summary__row${extra}`);
+      wrap.append(el("dt", null, label), el("dd", null, value));
+      list.append(wrap);
+    };
+
+    const after = player.balance - car.price;
+    row("Vehicle", car.name);
+    row("Class", classify(car.name).label);
+    row("Price", `${coins(car.price)} coins`);
+    row("Wallet now", `${coins(player.balance)} coins`);
+    row("Wallet after", `${coins(after)} coins`, " summary__row--total");
+    row("Stock after", car.stock === 1 ? "0 units (sold out)" : `${car.stock - 1} units`);
+    panel.append(list);
+
+    const note = el(
+      "p",
+      "modal__note",
+      "The server checks stock and your balance inside one database transaction. " +
+        "If either check fails, nothing is charged."
+    );
+    panel.append(note);
+
+    const errorBox = el("div", "alert alert--error");
+    errorBox.hidden = true;
+    panel.append(errorBox);
+
+    const actions = el("div", "modal__actions");
+    const cancel = el("button", "btn btn--ghost", "Cancel");
+    cancel.type = "button";
+    cancel.addEventListener("click", close);
+
+    const confirm = el("button", "btn btn--primary", `Confirm · ${coins(car.price)}`);
+    confirm.type = "button";
+    actions.append(cancel, confirm);
+    panel.append(actions);
+
+    let key = crypto.randomUUID();
+    let submitting = false;
+
+    const submit = async ({ retrySameKey = false } = {}) => {
+      if (submitting) return;
+      submitting = true;
+      errorBox.hidden = true;
+      confirm.classList.add("is-busy");
+      confirm.disabled = true;
+      cancel.disabled = true;
+
+      if (!retrySameKey) key = crypto.randomUUID();
+
+      let result;
+      try {
+        result = await api("POST", "/purchase", {
+          body: { player_id: player.id, car_id: car.id },
+          headers: { "Idempotency-Key": key },
+        });
+      } catch {
+        // Network failure: the request may still have landed. Retry once with the
+        // same key so the server replays instead of charging a second time.
+        try {
+          result = await api("POST", "/purchase", {
+            body: { player_id: player.id, car_id: car.id },
+            headers: { "Idempotency-Key": key },
+          });
+        } catch {
+          submitting = false;
+          confirm.classList.remove("is-busy");
+          confirm.disabled = false;
+          cancel.disabled = false;
+          errorBox.hidden = false;
+          errorBox.textContent =
+            "Could not reach the server. Nothing was charged — check that the API is running.";
+          return;
+        }
+      }
+
+      if (result.ok && result.data) {
+        // The server told us the exact remaining balance — use it immediately so
+        // the wallet never lags behind the receipt while refresh() is in flight.
+        const account = state.players.find((p) => p.id === player.id);
+        if (account) account.balance = result.data.balance_after;
+        renderWallet();
+
+        showReceipt(panel, close, car, result.data, player);
+        await refresh();
+        toast(
+          result.data.replayed
+            ? "Already reserved — replayed, no second charge."
+            : `${car.name} added to your garage.`,
+          "ok"
+        );
+        return;
+      }
+
+      submitting = false;
+      confirm.classList.remove("is-busy");
+      confirm.disabled = false;
+      cancel.disabled = false;
+
+      const detail = result.data?.detail ?? `Purchase failed (${result.status}).`;
+      errorBox.hidden = false;
+      errorBox.textContent = detail;
+
+      // The floor changes under us: refresh so the page matches the database.
+      await refresh();
+    };
+
+    confirm.addEventListener("click", () => submit());
+  });
 }
 
-/* ------------------------------------------------------------------ events */
+function showReceipt(panel, close, car, data, player) {
+  panel.replaceChildren();
+  modalHeader(panel, "Reservation complete");
+
+  const body = el("div", "receipt");
+  const check = el("div", "receipt__check");
+  check.innerHTML =
+    '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">' +
+    '<path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  body.append(check);
+
+  const title = el("h2", null, data.replayed ? "Already in your garage" : "Purchase complete");
+  const lead = el(
+    "p",
+    "modal__note",
+    data.replayed
+      ? "This request reused an earlier transaction key, so the server returned the original reservation instead of charging again."
+      : `${player.name}, your ${car.name} is ready for pickup on the Motorworks floor.`
+  );
+  body.append(title, lead);
+
+  const list = el("dl", "summary");
+  const row = (label, value, extra = "") => {
+    const wrap = el("div", `summary__row${extra}`);
+    wrap.append(el("dt", null, label), el("dd", null, value));
+    list.append(wrap);
+  };
+  row("Ownership ID", ownershipId(data.purchase_id));
+  row("Vehicle", data.car_name);
+  row("Paid", `${coins(data.price_paid)} coins`);
+  row("Wallet now", `${coins(data.balance_after)} coins`, " summary__row--total");
+  row("Units left", `${data.stock_after} of this model`, "");
+  body.append(list);
+
+  const actions = el("div", "modal__actions");
+  const garageBtn = el("button", "btn btn--quiet", "Go to garage");
+  garageBtn.type = "button";
+  garageBtn.addEventListener("click", () => {
+    close();
+    els.garageSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  const done = el("button", "btn btn--primary", "Done");
+  done.type = "button";
+  done.addEventListener("click", close);
+  actions.append(garageBtn, done);
+
+  body.append(actions);
+  panel.append(body);
+  done.focus();
+}
+
+/* ----------------------------------------------------------------- events */
 
 els.playerSelect.addEventListener("change", async (event) => {
   state.playerId = Number(event.target.value);
   localStorage.setItem("simerience:player", String(state.playerId));
-  renderBalance();
-  renderShop();
   await loadGarage();
+  renderAll();
 });
 
-els.refresh.addEventListener("click", () => refreshAll({ balanceFlash: true }));
+els.search.addEventListener("input", (event) => {
+  state.query = event.target.value.trim();
+  renderGrid();
+});
 
-els.retry.addEventListener("click", () => {
-  if (!state.lastAttempt) return;
-  const { playerId, carId, key } = state.lastAttempt;
-  if (playerId !== state.playerId) {
-    toast("Switch back to that player to retry the request.", "error");
-    return;
+els.sort.addEventListener("change", (event) => {
+  state.sort = event.target.value;
+  renderGrid();
+});
+
+els.heroBuy.addEventListener("click", () => {
+  const car = selectedCar();
+  if (car) openPurchase(car);
+});
+
+els.heroGarage.addEventListener("click", () => {
+  els.garageSection.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+els.shopRetry.addEventListener("click", async () => {
+  state.loading = true;
+  renderGrid();
+  await refresh();
+  state.loading = false;
+  renderGrid();
+});
+
+/* ------------------------------------------------------------------- boot */
+
+async function boot() {
+  renderGrid();
+  try {
+    await loadPlayers();
+    await Promise.all([loadCars(), loadGarage()]);
+  } catch {
+    showShopError("The showroom could not reach the dealership API.");
   }
-  purchase(carId, { key, isRetry: true });
-});
+  state.loading = false;
+  renderAll();
+}
 
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshAll();
-});
-
-renderLogs();
-refreshAll().catch(() => toast("Could not load the showroom.", "error"));
+boot();

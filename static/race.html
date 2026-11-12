@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIMERIENCE · Motorworks — Concurrency lab</title>
+  <meta name="description" content="Two buyers, one car, two real simultaneous purchase requests.">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar__inner">
+      <a class="wordmark" href="/">
+        <span class="wordmark__mark" aria-hidden="true">S</span>
+        <span class="wordmark__text">
+          <b>SIMERIENCE</b>
+          <span>Motorworks</span>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Sections">
+        <a href="/">Showroom</a>
+        <a href="/race" aria-current="page">Concurrency lab</a>
+        <a href="/docs" target="_blank" rel="noreferrer">API</a>
+      </nav>
+
+      <div class="topbar__right">
+        <span class="tag">live requests</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section aria-labelledby="race-title">
+      <p class="eyebrow">Concurrency lab &middot; development only</p>
+      <h1 class="stage__title" id="race-title">One unit. Two buyers. Zero oversell.</h1>
+      <p class="note" style="margin-top:14px">
+        Two demo players send a real <code>POST /purchase</code> at the same moment for the
+        last unit in stock. Nothing here is simulated: the page prints the server's actual
+        status codes and then re-reads the database to prove only one transaction committed.
+      </p>
+    </section>
+
+    <section aria-labelledby="prize-name">
+      <div class="section-head">
+        <h2 id="prize-heading">The contested unit</h2>
+        <span class="count" id="prize-count"></span>
+      </div>
+
+      <div class="prize">
+        <div id="prize-art" aria-hidden="true"></div>
+        <h2 class="stage__title" id="prize-name" style="font-size:clamp(24px,3vw,34px)">—</h2>
+        <div class="stage__meta">
+          <span class="tag" id="prize-class">—</span>
+          <span id="prize-stock" class="badge badge--low">checking stock</span>
+        </div>
+        <div class="stage__price"><span id="prize-price">—</span><small>coins</small></div>
+      </div>
+    </section>
+
+    <section aria-label="Buyers">
+      <div class="race-grid">
+        <div class="racer" id="racer-0"></div>
+        <div class="versus">both at once</div>
+        <div class="racer" id="racer-1"></div>
+      </div>
+
+      <div class="race-actions" style="margin-top:18px">
+        <button class="btn btn--primary" id="race-start" type="button" disabled>Start the race</button>
+        <span class="note" id="race-status" role="status" aria-live="polite">Loading players and inventory…</span>
+      </div>
+    </section>
+
+    <section id="results-section" hidden aria-labelledby="results-title">
+      <div class="section-head">
+        <h2 id="results-title">Actual server responses</h2>
+        <span class="count mono" id="race-elapsed"></span>
+      </div>
+      <div class="race-results" id="result-cards"></div>
+    </section>
+
+    <section class="verdict" id="verdict" hidden aria-labelledby="verdict-title">
+      <div class="verdict__title" id="verdict-title"></div>
+      <ul class="checklist" id="verdict-checks"></ul>
+      <p class="note" id="verdict-note"></p>
+    </section>
+
+    <div class="dev-strip">
+      <div class="dev-strip__text">
+        <b>Development only &middot; demo reset</b>
+        <span>
+          Wipes purchases and restores the two demo buyers and six vehicles. Set
+          <code>SIMERENCE_ALLOW_RESET=0</code> before starting the server to disable this endpoint.
+        </span>
+      </div>
+      <button class="btn btn--danger btn--sm" id="dev-reset" type="button">Reset demo data</button>
+    </div>
+
+    <footer class="footer">
+      <span>SIMERIENCE &middot; Motorworks — local prototype, game coins only</span>
+      <span>
+        <a href="/">Back to showroom</a> &middot;
+        <a href="/docs">API docs</a>
+      </span>
+    </footer>
+  </main>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <script type="module" src="/static/race.js"></script>
+</body>
+</html>

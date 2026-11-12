@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -30,6 +31,13 @@ def client():
         conn.execute("DELETE FROM purchases")
         conn.execute("DELETE FROM players")
         conn.execute("DELETE FROM cars")
+        try:
+            # Keep ids predictable for every test, not just the first one.
+            conn.execute(
+                "DELETE FROM sqlite_sequence WHERE name IN ('purchases', 'players', 'cars')"
+            )
+        except sqlite3.OperationalError:
+            pass  # sqlite_sequence appears only after the first AUTOINCREMENT insert
     finally:
         conn.close()
     with TestClient(app) as c:

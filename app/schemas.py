@@ -59,3 +59,9 @@ class PurchaseResult(BaseModel):
 class HealthOut(BaseModel):
     status: str
     database: str
+
+
+class DevResetOut(BaseModel):
+    players: int
+    cars: int
+    purchases: int

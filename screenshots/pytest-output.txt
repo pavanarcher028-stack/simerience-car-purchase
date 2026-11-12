@@ -4,23 +4,29 @@ cachedir: .pytest_cache
 hypothesis profile 'default'
 rootdir: C:\Users\natar\Documents\Visual Studio 18\simerience-car-purchase
 plugins: anyio-4.12.1, hypothesis-6.163.0
-collecting ... collected 16 items
+collecting ... collected 22 items
 
-tests/test_prototype.py::test_01_player_can_see_balance_and_shop PASSED  [  6%]
-tests/test_prototype.py::test_02_purchase_deducts_coins PASSED           [ 12%]
-tests/test_prototype.py::test_03_car_appears_in_garage PASSED            [ 18%]
-tests/test_prototype.py::test_04_purchase_survives_a_restart PASSED      [ 25%]
-tests/test_prototype.py::test_05_insufficient_balance_changes_nothing PASSED [ 31%]
-tests/test_prototype.py::test_06_only_one_player_wins_the_last_car PASSED [ 37%]
-tests/test_prototype.py::test_06b_no_oversell_under_heavy_concurrency PASSED [ 43%]
-tests/test_prototype.py::test_07_retry_with_same_key_is_not_charged_twice PASSED [ 50%]
-tests/test_prototype.py::test_07b_same_key_concurrent_requests_charge_once PASSED [ 56%]
-tests/test_prototype.py::test_08_sold_out_car_cannot_be_bought PASSED    [ 62%]
-tests/test_prototype.py::test_09_reused_key_for_a_different_car_is_rejected PASSED [ 68%]
-tests/test_prototype.py::test_10_unknown_player_or_car_returns_404 PASSED [ 75%]
-tests/test_prototype.py::test_11_missing_idempotency_key_is_rejected PASSED [ 81%]
-tests/test_web.py::test_showroom_page_is_served PASSED                   [ 87%]
-tests/test_web.py::test_showroom_assets_are_served PASSED                [ 93%]
+tests/test_dev.py::test_reset_restores_the_demo_dealership PASSED        [  4%]
+tests/test_dev.py::test_reset_is_idempotent PASSED                       [  9%]
+tests/test_dev.py::test_reset_clears_purchases_and_refunds_wallets PASSED [ 13%]
+tests/test_dev.py::test_reset_can_be_disabled_for_demos PASSED           [ 18%]
+tests/test_dev.py::test_race_page_and_assets_are_served PASSED           [ 22%]
+tests/test_dev.py::test_http_race_has_exactly_one_winner PASSED          [ 27%]
+tests/test_prototype.py::test_01_player_can_see_balance_and_shop PASSED  [ 31%]
+tests/test_prototype.py::test_02_purchase_deducts_coins PASSED           [ 36%]
+tests/test_prototype.py::test_03_car_appears_in_garage PASSED            [ 40%]
+tests/test_prototype.py::test_04_purchase_survives_a_restart PASSED      [ 45%]
+tests/test_prototype.py::test_05_insufficient_balance_changes_nothing PASSED [ 50%]
+tests/test_prototype.py::test_06_only_one_player_wins_the_last_car PASSED [ 54%]
+tests/test_prototype.py::test_06b_no_oversell_under_heavy_concurrency PASSED [ 59%]
+tests/test_prototype.py::test_07_retry_with_same_key_is_not_charged_twice PASSED [ 63%]
+tests/test_prototype.py::test_07b_same_key_concurrent_requests_charge_once PASSED [ 68%]
+tests/test_prototype.py::test_08_sold_out_car_cannot_be_bought PASSED    [ 72%]
+tests/test_prototype.py::test_09_reused_key_for_a_different_car_is_rejected PASSED [ 77%]
+tests/test_prototype.py::test_10_unknown_player_or_car_returns_404 PASSED [ 81%]
+tests/test_prototype.py::test_11_missing_idempotency_key_is_rejected PASSED [ 86%]
+tests/test_web.py::test_showroom_page_is_served PASSED                   [ 90%]
+tests/test_web.py::test_showroom_assets_are_served PASSED                [ 95%]
 tests/test_web.py::test_swagger_ui_still_works PASSED                    [100%]
 
-============================= 16 passed in 1.69s ==============================
+============================= 22 passed in 1.89s ==============================

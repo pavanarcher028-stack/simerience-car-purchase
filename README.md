@@ -1,84 +1,149 @@
-# SIMERIENCE — Car Purchase Prototype
+# SIMERIENCE — Motorworks
 
-A small, working prototype for the car shop in SIMERIENCE. A player has game coins,
-the shop has limited stock, and buying a car has to be **atomic**: coins leave the
-wallet, stock goes down, and the car lands in the garage — all or nothing.
+A car dealership feature for a life-simulation game, built as a working prototype.
+A player has game coins, the floor has limited stock, and buying a car is
+**atomic**: coins leave the wallet, stock drops, and the car lands in the garage —
+all in one transaction, or not at all.
 
-Built with **Python + FastAPI + SQLite**, plus a visual showroom page served by the
-same app. No game engine, no real money, no cloud.
+The backend is **Python + FastAPI + SQLite**. The front end is plain HTML, CSS and
+JavaScript served by the same app — no framework, no build step, no npm. It is a
+game-style showroom, not a SaaS dashboard.
 
-![Showroom](screenshots/04-showroom.jpeg)
-
----
-
-## What it proves
-
-| # | Checklist item | Where it is proven |
-|---|---|---|
-| 1 | Player sees their balance and the available cars | `test_01_player_can_see_balance_and_shop` |
-| 2 | Buying a car deducts the correct number of coins | `test_02_purchase_deducts_coins` |
-| 3 | The purchased car appears in the garage | `test_03_car_appears_in_garage` |
-| 4 | Restarting the server keeps the purchase | `test_04_purchase_survives_a_restart` |
-| 5 | Insufficient balance deducts nothing | `test_05_insufficient_balance_changes_nothing` |
-| 6 | Two players cannot buy the same last car | `test_06_only_one_player_wins_the_last_car`, `test_06b_no_oversell_under_heavy_concurrency` |
-| 7 | Retrying the same request does not charge twice | `test_07_retry_with_same_key_is_not_charged_twice`, `test_07b_same_key_concurrent_requests_charge_once` |
-
-16 tests, all passing (`python -m pytest -v`). Full output: [screenshots/pytest-output.txt](screenshots/pytest-output.txt).
+![Showroom](screenshots/01-showroom.jpeg)
 
 ---
 
 ## Run it
 
-```bash
+From the project folder (Windows PowerShell):
+
+```powershell
+cd path\to\simerience-car-purchase
 python -m pip install -r requirements.txt
-python seed.py                 # demo players + cars
-python -m uvicorn main:app --reload
+python seed.py --reset          # demo buyers + six vehicles, clean slate
+python -m uvicorn main:app      # http://127.0.0.1:8000
 ```
 
-Open **http://127.0.0.1:8000/** for the showroom, or
-**http://127.0.0.1:8000/docs** for Swagger UI and *Try it out* on any endpoint.
+Open **http://127.0.0.1:8000/** for the showroom,
+**http://127.0.0.1:8000/race** for the concurrency lab, and
+**http://127.0.0.1:8000/docs** for Swagger UI.
 
-> `seed.py --reset` deletes the database and starts over.
+Stop the server with `Ctrl+C`.
+
+Useful variations:
+
+| Command | Effect |
+|---|---|
+| `python seed.py` | Adds demo data only if the tables are empty (keeps existing purchases) |
+| `python seed.py --reset` | Wipes purchases, players and cars, then reseeds the demo state |
+| `$env:SIMERENCE_ALLOW_RESET="0"` before uvicorn | Disables `POST /dev/reset` and the reset button (returns `403`) |
+| `python -m pytest -v` | Runs the full test suite against a throwaway database |
+
+The database is `simerience.db` in this folder and is created on first run.
+
+---
+
+## Two-minute demo script
+
+| Time | What to do | What to point out |
+|---|---|---|
+| 0:00 | Open `http://127.0.0.1:8000/` | Featured **Apex GT-R**, 85,000 coins, **1 unit left**, Ash has 100,000 |
+| 0:10 | Click **Sport**, then **All**; type `cobalt` in the search, then clear it | Filters, search and sort are live and only touch `/cars` |
+| 0:20 | Click **Reserve · 85,000** on the hero | Confirmation modal: vehicle, class, price, **wallet now 100,000 → wallet after 15,000**, stock after |
+| 0:35 | Click **Confirm · 85,000** | Real `POST /purchase`: receipt shows ownership ID **SIM-00001**, wallet 15,000, 0 units left; toast confirms |
+| 0:50 | Click **Done**, then **Go to garage** / scroll down | Garage row with the ownership ID, price paid and timestamp; the hero is now **Sold out** |
+| 1:00 | Switch **Playing as** to **Riya** | Riya still has 100,000; her garage is empty; the Apex is **Sold out** for everyone |
+| 1:10 | Open **Concurrency lab** | One contested unit, two buyers, real `POST /purchase` requests |
+| 1:20 | Click **Race for the Apex GT-R** | Two request cards show the actual status codes — one **201**, one **409** — with the raw JSON and timings |
+| 1:35 | Read the verdict | **PASS**: exactly one 201, stock is 0, only the winner was debited, exactly one garage owns the car. Winner is whichever request committed first (it can be Ash or Riya) |
+| 1:45 | Click **Reset demo data**, confirm | Development-only reset wipes purchases and restores 2 buyers / 6 vehicles; the showroom is back to 100,000 each |
+
+Optional finish: set `SIMERENCE_ALLOW_RESET=0`, restart the server, and show that
+the button now returns `403` — handy before handing the laptop to someone else.
 
 ---
 
 ## The showroom
 
-`static/` is plain HTML, CSS and JavaScript — no build step, no npm, no extra
-process. FastAPI serves it at `/`, so the page and the API share an origin and no
-CORS setup is needed.
+![Purchase confirmation](screenshots/02-purchase-confirm.jpeg)
 
-What you can do in the page:
+- **Featured stage** with the largest vehicle on the floor, its class, stock and
+  price. It follows the last vehicle you viewed.
+- **Showroom grid** with class filters (Sport, SUV, Off-road, Compact, Luxury,
+  In garage), text search, and sorting by price or stock.
+- **Purchase modal** showing the vehicle, price, wallet before, wallet after and
+  stock after the purchase. Wallet-after is computed client-side for the preview
+  and labelled; the receipt uses the server's real `balance_after`.
+- **Receipt** with the ownership ID, amount paid, remaining wallet and remaining
+  stock, all taken from the `POST /purchase` response or a fresh read.
+- **Garage** listing owned vehicles with `SIM-00001`-style ownership IDs, price paid
+  and purchase timestamp (from `GET /players/{id}/garage`).
+- Wallet, stock, affordability and garage refresh after every purchase; buttons
+  disable themselves for sold-out or unaffordable vehicles; server errors are shown
+  verbatim; loading skeletons and toasts cover slow and failed requests.
+- Every visible control does something — there are no decorative buttons.
 
-- **Switch players** with the dropdown (the choice is remembered in `localStorage`).
-- **See the wallet and the shop**: balance, price, and remaining stock per car.
-- **Buy** with one click. The button shows a spinner while the request is in
-  flight, so a double click cannot fire two purchases.
-- **See the result**: the balance flashes, the car appears in the garage, and the
-  request log records the HTTP status.
-- **Retry safely**: *Retry last (same key)* resends the last request with the same
-  `Idempotency-Key`, and the backend replays it instead of charging again.
+![Purchase receipt](screenshots/03-purchase-receipt.jpeg)
 
-![Purchase](screenshots/05-showroom-purchase.jpeg)
+![Garage](screenshots/04-garage.jpeg)
 
-![Replay on retry](screenshots/06-showroom-replay.jpeg)
+### Vehicle visuals — honest note
 
-The two rows share the key `24b42f5c`: the second call bought the car, the third
-returned `201 replayed` — same purchase, balance unchanged at 70,000.
+The cars are **original SVG side-profile illustrations**, generated in
+`static/art.js`. They are **not photographs and not a licensed car library**.
+Each model gets a body type, proportions and paint based on its name (for example
+`Ranger 4x4` → pickup, `Vanta Cross` → SUV). This keeps the demo offline-friendly
+and means nothing can 404.
 
-**The front end has no database access.** It only calls the endpoints below, so
-every protection from the backend still applies: stock, balance, transactions and
-idempotency are all enforced in `app/store.py`, not in the browser.
+The showroom only displays facts that exist in the database: name, price, stock
+and purchase history. No horsepower, top speed, mileage or other invented specs.
 
-Errors surface as written by the API, for example
-`Insufficient balance: you have 4000 coins, this car costs 12000.` after a `400`,
-or "just sold out, no coins were taken" after a `409`.
+---
 
-### Endpoints
+## The concurrency lab
+
+`/race` is a development page that proves the backend does not oversell, using the
+real HTTP API rather than a simulation.
+
+1. It picks a vehicle with `stock === 1` that both demo buyers can afford.
+2. On **Race for the Apex GT-R**, it fires two `POST /purchase` calls in the same
+   JavaScript tick with `Promise.all` and a fresh `Idempotency-Key` per request.
+3. It prints each request's real status, duration and JSON body.
+4. It then re-reads `/cars`, `/players/{id}` and `/players/{id}/garage` and checks:
+   - exactly one request returned `201`;
+   - the other returned `409 Conflict`;
+   - the contested car's stock is now `0`;
+   - only the winner's wallet was debited;
+   - exactly one garage contains the vehicle.
+
+The verdict is **PASS** only when every check holds. Nothing is hard-coded: if the
+database disagreed, the page would show **FAIL** and the failing line.
+
+![Race lab ready](screenshots/05-race-ready.jpeg)
+
+![Race verified](screenshots/06-race-verified.jpeg)
+
+> Seeing a red `409 (Conflict)` entry in the browser console on this page is
+> expected — that is the losing purchase being rejected by the server. The request
+> is handled in the UI; it is not an uncaught script error.
+
+### Development reset
+
+`POST /dev/reset` wipes purchases and restores the demo buyers and vehicles. It is
+development-only, marked as such in the UI, and enabled by default for this local
+prototype. Disable it with `SIMERENCE_ALLOW_RESET=0` before starting the server.
+
+![Mobile layout](screenshots/07-mobile-showroom.jpeg)
+
+---
+
+## API
 
 | Method | Path | What it does |
 |---|---|---|
-| `GET` | `/` | The showroom page |
+| `GET` | `/` | Showroom page |
+| `GET` | `/race` | Concurrency lab page |
+| `POST` | `/dev/reset` | **DEV ONLY** — wipe and reseed demo data (403 if disabled) |
 | `POST` | `/players` | Create a player with a starting balance (default 100,000) |
 | `GET` | `/players` | List players |
 | `GET` | `/players/{id}` | Balance |
@@ -89,150 +154,70 @@ or "just sold out, no coins were taken" after a `409`.
 | `POST` | `/purchase` | Buy a car — requires an `Idempotency-Key` header |
 | `GET` | `/health` | Liveness + database path |
 
-![Swagger UI](screenshots/01-swagger-ui.jpeg)
-
-### Buy a car from the shell
-
-```bash
-curl -X POST http://127.0.0.1:8000/purchase \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: ash-buys-suv-001" \
-  -d '{"player_id": 1, "car_id": 2}'
-```
+Buy from the shell:
 
 ```powershell
-# PowerShell
 $body = @{ player_id = 1; car_id = 2 } | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/purchase `
   -ContentType "application/json" -Headers @{ "Idempotency-Key" = "ash-buys-suv-001" } `
   -Body $body
 ```
 
-```json
-{
-  "purchase_id": 3,
-  "player_id": 1,
-  "car_id": 2,
-  "car_name": "SUV",
-  "price_paid": 30000,
-  "balance_after": 70000,
-  "stock_after": 1,
-  "replayed": false
-}
-```
-
-Run the **exact same request again** and you get the same `purchase_id` with
-`"replayed": true` — the balance stays at 70,000.
-
-| First purchase | Retry with the same key |
-|---|---|
-| ![201](screenshots/02-purchase-201.jpeg) | ![replayed](screenshots/03-retry-idempotent.jpeg) |
+Repeat the **same request with the same key** and the server returns the original
+purchase with `"replayed": true` — no second charge.
 
 ---
 
-## How the purchase works
+## Why purchases cannot oversell
 
-All of the interesting logic is one function in
-[`app/store.py`](app/store.py): `purchase_car()`.
+All purchase logic lives in `app/store.py` → `purchase_car()`.
 
 ```python
-conn.execute("BEGIN IMMEDIATE")          # take the write lock up front
+conn.execute("BEGIN IMMEDIATE")          # take the write lock before reading
 
-# 1. already bought with this key? return the original result
-replay = _existing_purchase(conn, idempotency_key, player_id, car_id)
+replay = _existing_purchase(...)         # same key? return the stored result
+player = ...                             # balance
+car    = ...                             # price, stock
 
-# 2. read the current state (trustworthy: we hold the lock)
-player = ...  # balance
-car    = ...  # price, stock
-
-# 3. conditional writes: the WHERE clause is the guard, rowcount is the proof
 UPDATE players SET balance = balance - ? WHERE id = ? AND balance >= ?
 UPDATE cars    SET stock   = stock - 1    WHERE id = ? AND stock > 0
-
-# 4. record ownership in the same transaction
-INSERT INTO purchases (...)
+INSERT INTO purchases (...)              # ownership + balance_after + stock_after
 COMMIT
 ```
 
-If any step fails we `ROLLBACK`, so the balance and the stock never move.
+If either conditional `UPDATE` affects zero rows, the transaction rolls back, so
+neither the wallet nor the stock moves. `BEGIN IMMEDIATE` closes the
+read-then-write gap that causes double-selling. The `UNIQUE` idempotency key makes
+retries and simultaneous duplicates safe, and `balance_after` / `stock_after` are
+stored on the purchase row so a replay returns exactly the original result.
 
-### Four rules, four mechanisms
-
-| Rule | Mechanism |
-|---|---|
-| Atomic | One transaction — deduct, decrement and insert commit together or not at all |
-| No oversell | `UPDATE cars SET stock = stock - 1 WHERE id = ? AND stock > 0` + `rowcount == 1` |
-| No overdraft | `UPDATE players SET balance = balance - ? WHERE id = ? AND balance >= ?` + `rowcount == 1` |
-| Idempotent | `idempotency_key` column with a `UNIQUE` constraint |
-
-### Why `BEGIN IMMEDIATE`
-
-`BEGIN IMMEDIATE` grabs the write lock *before* the reads. That closes the
-read-then-write gap that causes double-selling:
-
-```
-Player A: SELECT stock -> 1                                 UPDATE stock -> 0
-Player B:          SELECT stock -> 1    UPDATE stock -> 0
-                                        ^ both thought the car was available
-```
-
-That naive version is in [`tests/naive_oversell_demo.py`](tests/naive_oversell_demo.py).
-Run it and you get `stock: -1` — the same car sold to two players. The real
-implementation serialises the writers, so the second one re-reads `stock = 0`
-and gets a `409 Sold out`.
-
-### Why an `Idempotency-Key`
-
-Networks retry. A player taps *Buy*, the response is lost, the client retries —
-without protection they pay twice. The key makes the operation safe to repeat:
-
-- first call → charges, returns `replayed: false`
-- later calls with the same key → returns the stored result, `replayed: true`
-- same key for a *different* car → `409`, so a client bug can't silently
-  return somebody else's purchase
-
-The column is `UNIQUE`, which also covers two identical requests arriving at the
-same moment: the loser hits the constraint, rolls back its own deductions, and
-returns the winner's result.
-
-### Database
-
-```sql
-players   (id, name UNIQUE, balance CHECK (balance >= 0), created_at)
-cars      (id, name, price CHECK (price > 0), stock CHECK (stock >= 0))
-purchases (id, player_id, car_id, price_paid, balance_after, stock_after,
-           idempotency_key UNIQUE, created_at)
-```
-
-`balance_after` and `stock_after` are stored on the purchase row so a replay
-returns exactly what the original call returned, even after later purchases.
-Stock and balance also have `CHECK` constraints as a last line of defence.
+The naive failing version is in `tests/naive_oversell_demo.py`; the real
+implementation is exercised by the test suite and by the race page.
 
 ---
 
-## Demo script
+## Tests
 
-With the server running:
-
-```bash
-python demo.py
+```powershell
+python -m pytest -v
 ```
 
-It creates two players and a car with **1 in stock**, fires both purchases at the
-same instant, then retries one purchase three times:
+**22 passed** (the 16 original tests are unchanged; 6 were added). Full output:
+[screenshots/pytest-output.txt](screenshots/pytest-output.txt).
 
-```
-2) Both players press BUY at the same instant
-  Ash buys the last car    409  {"detail": "Sports Car is sold out."}
-  Riya buys the last car   201  {..., "balance_after": 50000, "stock_after": 0, "replayed": false}
+New coverage:
 
-4) Retry the same purchase request three times (same Idempotency-Key)
-  attempt 1    201  {"purchase_id": 7, "balance_after": 70000, "replayed": false}
-  attempt 2    201  {"purchase_id": 7, "balance_after": 70000, "replayed": true}
-  attempt 3    201  {"purchase_id": 7, "balance_after": 70000, "replayed": true}
-```
+- `tests/test_dev.py` — reset restores the demo dataset; reset is idempotent;
+  reset clears purchases and refunds wallets; `SIMERENCE_ALLOW_RESET=0` returns
+  `403`; `/race` and `static/race.js` are served and kept out of the OpenAPI paths;
+  an HTTP-level simultaneous race produces exactly one `201` and one `409`, with
+  one charged wallet and one garage entry.
+- `tests/test_web.py` — unchanged showroom assertions still pass.
+- `tests/conftest.py` — the test fixture now also resets SQLite sequences, so ids
+  are predictable regardless of test order.
 
-Full transcript: [screenshots/demo-output.txt](screenshots/demo-output.txt).
+The race test uses `ThreadPoolExecutor` + a `threading.Barrier`; it releases both
+requests together and asserts on their real status codes.
 
 ---
 
@@ -242,21 +227,28 @@ Full transcript: [screenshots/demo-output.txt](screenshots/demo-output.txt).
 simerience-car-purchase/
 ├── app/
 │   ├── db.py          # connection settings, schema, WAL + busy_timeout
-│   ├── store.py       # business logic, the purchase transaction
+│   ├── store.py       # business logic, the atomic purchase transaction
 │   ├── schemas.py     # request/response models
-│   └── main.py        # FastAPI routes + serves the showroom at /
+│   ├── demo_data.py   # one source of demo players/cars for seed + reset
+│   └── main.py        # FastAPI routes; serves /, /race and /static
 ├── static/
-│   ├── index.html     # showroom page
-│   ├── styles.css     # dark game-style UI
-│   └── app.js         # fetch calls, rendering, retry logic
+│   ├── index.html     # showroom
+│   ├── race.html      # concurrency lab
+│   ├── styles.css     # design system, responsive layout
+│   ├── api.js         # shared fetch/format helpers
+│   ├── art.js         # original SVG vehicle illustrations
+│   ├── app.js         # showroom logic, modal, receipt, garage
+│   ├── race.js        # real simultaneous purchases + verification
+│   └── favicon.svg
 ├── tests/
-│   ├── conftest.py               # throwaway database per test run
-│   ├── test_prototype.py         # the 7 checklist tests + 6 extra guards
-│   ├── test_web.py               # the page and its assets are served
+│   ├── conftest.py               # throwaway DB per test run
+│   ├── test_prototype.py         # original checklist tests + guards
+│   ├── test_dev.py               # reset + race lab coverage (new)
+│   ├── test_web.py               # pages and assets are served
 │   └── naive_oversell_demo.py    # the bug this design prevents
 ├── main.py            # `uvicorn main:app` entry point
-├── seed.py            # demo players and cars
-├── demo.py            # live race + retry demo
+├── seed.py            # demo data (additive or --reset)
+├── demo.py            # live race + retry transcript
 └── screenshots/
 ```
 
@@ -264,32 +256,18 @@ simerience-car-purchase/
 
 ## Limits of this prototype
 
-- **Single process, single file database.** SQLite serialises writers, which is
-  perfect for a prototype and a single server. A real multiplayer launch would
-  move to PostgreSQL and use `SELECT ... FOR UPDATE` for the same guarantees.
-- **No authentication.** Anyone can buy as anyone; `player_id` comes from the
-  request body. A real build takes the player id from a login token.
+- **Single process, single SQLite file.** Perfect for a local demo; a real
+  multiplayer launch would use PostgreSQL and `SELECT ... FOR UPDATE`.
+- **No authentication.** Anyone can act as any `player_id`. A real build takes the
+  player from a login token.
 - **`POST /cars` is open.** Fine for a prototype; it would be an admin endpoint.
-- **No money, no refunds, no taxes.** Game coins only.
-- **Idempotency keys never expire.** Production would keep them for ~24h.
-- **The showroom is a prototype UI.** One page, no router, no offline cache. It
-  re-reads the server after every purchase, so what you see is what the database
-  actually holds.
+- **No real money, refunds, taxes or production matchmaking.** Game coins only, and
+  the race page is a concurrency demonstration rather than a multiplayer service.
+- **The vehicle art is illustrative.** Original SVG silhouettes, not licensed
+  manufacturer assets. Swapping in real art only requires replacing `carArt()`.
+- **The reset endpoint is for development.** Keep `SIMERENCE_ALLOW_RESET=0` on any
+  machine you hand to someone else.
+- **Idempotency keys never expire.** Production would keep them for roughly a day.
 
-Next steps if this became real: auth, a `transactions` ledger, a `/refund`
-endpoint with its own idempotency key, and Postgres.
-
----
-
-## Publish to GitHub
-
-```bash
-git init
-git add .
-git commit -m "SIMERIENCE car purchase prototype: atomic SQLite transactions + idempotent purchases"
-git branch -M main
-git remote add origin https://github.com/<your-username>/simerience-car-purchase-prototype.git
-git push -u origin main
-```
-
-`*.db`, `__pycache__` and `.pytest_cache` are gitignored; the screenshots are not.
+The front end has no database access: it only calls the API, so stock, balance,
+transaction and idempotency protections remain enforced in `app/store.py`.
