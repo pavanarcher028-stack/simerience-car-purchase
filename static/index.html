@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIMERIENCE · Car Showroom</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">S</span>
+      <div>
+        <h1>SIMERIENCE</h1>
+        <p>Car Showroom</p>
+      </div>
+    </div>
+
+    <div class="wallet">
+      <div class="field">
+        <label for="player-select">Playing as</label>
+        <select id="player-select"></select>
+      </div>
+      <div class="balance" title="Coin balance">
+        <span class="coin" aria-hidden="true">◎</span>
+        <span id="balance-value" aria-live="polite">—</span>
+        <span class="balance-label">coins</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section aria-labelledby="shop-title">
+      <div class="section-head">
+        <h2 id="shop-title">Showroom</h2>
+        <button id="refresh" class="ghost" type="button">Refresh</button>
+      </div>
+      <div id="car-grid" class="grid"></div>
+      <p id="shop-empty" class="empty" hidden>
+        No cars in the shop yet. Run <code>python seed.py</code> in the project folder.
+      </p>
+    </section>
+
+    <section aria-labelledby="garage-title">
+      <div class="section-head">
+        <h2 id="garage-title">Your garage</h2>
+        <span id="garage-count" class="pill"></span>
+      </div>
+      <ul id="garage-list" class="garage"></ul>
+      <p id="garage-empty" class="empty">Nothing here yet — buy your first car.</p>
+    </section>
+
+    <section aria-labelledby="log-title" class="log-panel">
+      <div class="section-head">
+        <h2 id="log-title">Purchase requests</h2>
+        <button id="retry" class="ghost" type="button" disabled>Retry last (same key)</button>
+      </div>
+      <div id="log" class="log">
+        <p class="empty">Requests appear here, with the status the backend returned.</p>
+      </div>
+      <p class="hint">
+        Every attempt sends a fresh <code>Idempotency-Key</code>. “Retry last” resends the
+        exact same key, so the backend replays the result instead of charging again.
+      </p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

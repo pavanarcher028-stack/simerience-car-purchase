@@ -1,12 +1,13 @@
 # SIMERIENCE — Car Purchase Prototype
 
-A small, working backend for the car shop in SIMERIENCE. A player has game coins,
+A small, working prototype for the car shop in SIMERIENCE. A player has game coins,
 the shop has limited stock, and buying a car has to be **atomic**: coins leave the
 wallet, stock goes down, and the car lands in the garage — all or nothing.
 
-Built with **Python + FastAPI + SQLite**. No game engine, no real money, no cloud.
+Built with **Python + FastAPI + SQLite**, plus a visual showroom page served by the
+same app. No game engine, no real money, no cloud.
 
-![Swagger UI](screenshots/01-swagger-ui.jpeg)
+![Showroom](screenshots/04-showroom.jpeg)
 
 ---
 
@@ -22,7 +23,7 @@ Built with **Python + FastAPI + SQLite**. No game engine, no real money, no clou
 | 6 | Two players cannot buy the same last car | `test_06_only_one_player_wins_the_last_car`, `test_06b_no_oversell_under_heavy_concurrency` |
 | 7 | Retrying the same request does not charge twice | `test_07_retry_with_same_key_is_not_charged_twice`, `test_07b_same_key_concurrent_requests_charge_once` |
 
-13 tests, all passing (`python -m pytest -v`). Full output: [screenshots/pytest-output.txt](screenshots/pytest-output.txt).
+16 tests, all passing (`python -m pytest -v`). Full output: [screenshots/pytest-output.txt](screenshots/pytest-output.txt).
 
 ---
 
@@ -34,14 +35,50 @@ python seed.py                 # demo players + cars
 python -m uvicorn main:app --reload
 ```
 
-Open **http://127.0.0.1:8000/docs** for Swagger UI and click *Try it out* on any endpoint.
+Open **http://127.0.0.1:8000/** for the showroom, or
+**http://127.0.0.1:8000/docs** for Swagger UI and *Try it out* on any endpoint.
 
 > `seed.py --reset` deletes the database and starts over.
+
+---
+
+## The showroom
+
+`static/` is plain HTML, CSS and JavaScript — no build step, no npm, no extra
+process. FastAPI serves it at `/`, so the page and the API share an origin and no
+CORS setup is needed.
+
+What you can do in the page:
+
+- **Switch players** with the dropdown (the choice is remembered in `localStorage`).
+- **See the wallet and the shop**: balance, price, and remaining stock per car.
+- **Buy** with one click. The button shows a spinner while the request is in
+  flight, so a double click cannot fire two purchases.
+- **See the result**: the balance flashes, the car appears in the garage, and the
+  request log records the HTTP status.
+- **Retry safely**: *Retry last (same key)* resends the last request with the same
+  `Idempotency-Key`, and the backend replays it instead of charging again.
+
+![Purchase](screenshots/05-showroom-purchase.jpeg)
+
+![Replay on retry](screenshots/06-showroom-replay.jpeg)
+
+The two rows share the key `24b42f5c`: the second call bought the car, the third
+returned `201 replayed` — same purchase, balance unchanged at 70,000.
+
+**The front end has no database access.** It only calls the endpoints below, so
+every protection from the backend still applies: stock, balance, transactions and
+idempotency are all enforced in `app/store.py`, not in the browser.
+
+Errors surface as written by the API, for example
+`Insufficient balance: you have 4000 coins, this car costs 12000.` after a `400`,
+or "just sold out, no coins were taken" after a `409`.
 
 ### Endpoints
 
 | Method | Path | What it does |
 |---|---|---|
+| `GET` | `/` | The showroom page |
 | `POST` | `/players` | Create a player with a starting balance (default 100,000) |
 | `GET` | `/players` | List players |
 | `GET` | `/players/{id}` | Balance |
@@ -51,6 +88,8 @@ Open **http://127.0.0.1:8000/docs** for Swagger UI and click *Try it out* on any
 | `GET` | `/cars/{id}` | One car |
 | `POST` | `/purchase` | Buy a car — requires an `Idempotency-Key` header |
 | `GET` | `/health` | Liveness + database path |
+
+![Swagger UI](screenshots/01-swagger-ui.jpeg)
 
 ### Buy a car from the shell
 
@@ -205,10 +244,15 @@ simerience-car-purchase/
 │   ├── db.py          # connection settings, schema, WAL + busy_timeout
 │   ├── store.py       # business logic, the purchase transaction
 │   ├── schemas.py     # request/response models
-│   └── main.py        # FastAPI routes
+│   └── main.py        # FastAPI routes + serves the showroom at /
+├── static/
+│   ├── index.html     # showroom page
+│   ├── styles.css     # dark game-style UI
+│   └── app.js         # fetch calls, rendering, retry logic
 ├── tests/
 │   ├── conftest.py               # throwaway database per test run
 │   ├── test_prototype.py         # the 7 checklist tests + 6 extra guards
+│   ├── test_web.py               # the page and its assets are served
 │   └── naive_oversell_demo.py    # the bug this design prevents
 ├── main.py            # `uvicorn main:app` entry point
 ├── seed.py            # demo players and cars
@@ -228,6 +272,9 @@ simerience-car-purchase/
 - **`POST /cars` is open.** Fine for a prototype; it would be an admin endpoint.
 - **No money, no refunds, no taxes.** Game coins only.
 - **Idempotency keys never expire.** Production would keep them for ~24h.
+- **The showroom is a prototype UI.** One page, no router, no offline cache. It
+  re-reads the server after every purchase, so what you see is what the database
+  actually holds.
 
 Next steps if this became real: auth, a `transactions` ledger, a `/refund`
 endpoint with its own idempotency key, and Postgres.

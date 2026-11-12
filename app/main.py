@@ -8,9 +8,11 @@ Then open http://127.0.0.1:8000/docs
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path as FileSystemPath
 
 from fastapi import FastAPI, Header, Path
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import store
 from .db import db_path, init_db
@@ -49,6 +51,19 @@ app = FastAPI(
 @app.exception_handler(store.AppError)
 async def app_error_handler(_, exc: store.AppError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+# --------------------------------------------------------------------------- #
+# Showroom (static front end, same origin as the API)
+# --------------------------------------------------------------------------- #
+STATIC_DIR = FileSystemPath(__file__).resolve().parent.parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False, response_class=FileResponse)
+def showroom() -> FileResponse:
+    """The visual car showroom. The API below is the only thing it talks to."""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 # --------------------------------------------------------------------------- #
